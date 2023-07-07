@@ -47,3 +47,12 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Folders
+/data/
+/documents/
+/plots/
+
+# Specific extensions
+*.Rproj
+*.html

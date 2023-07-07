@@ -1,0 +1,270 @@
+---
+title: "PhD thesis - analyses and figures"
+author: "Pierre Priou - ppr@akavaplan.niva.no"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+---
+
+This document contains the code used to create figures for my PhD thesis. 
+
+# Packages required
+
+Load packages.
+
+```{r packages, message=FALSE}
+library(raster)
+library(sf)
+library(tidyverse)
+library(lubridate)
+library(marmap)
+library(cmocean)
+library(ggnewscale)
+source("R/getNOAA.ice.bathy.R")
+```
+
+Set figure theme.
+
+```{r update-fig-theme}
+# Theme for figures
+theme_set(theme_bw())
+theme_update(panel.grid = element_blank(), 
+             panel.border = element_blank(), 
+             axis.line = element_line(),
+             axis.text = element_text(size = 8),
+             axis.title = element_text(size = 9),
+             legend.title = element_text(size = 9),
+             strip.text.x = element_text(size = 8, face = "plain", hjust = 0.5),
+             strip.background = element_rect(colour = "transparent",  fill = "transparent"),
+             legend.margin = margin(0, 0, 0, 0),
+             legend.box.margin = margin(0, 0, -8, 0),
+             plot.margin = unit(c(0.05, 0.05, 0.05, 0.05), "in"))
+```
+
+# Introduction
+
+## The Arctic Ocean
+
+### Fig 1.1. Map Arctic Ocean
+
+Map of the Arctic Ocean with bathymetry. 
+
+Define new projection.
+
+```{r}
+# Polar stereographic projection for bathy and all other files
+arctic_6931 <- raster(extent(-3500, 3500, -3500, 3500), crs = "EPSG:6931") 
+projection(arctic_6931) <- gsub("units=m", "units=km",  projection(arctic_6931))
+```
+
+Load data: coastline, rivers, graticules, and bathymetry.
+
+```{r ,warning=FALSE}
+# Coastline shapefiles
+coast_6931 <- rgdal::readOGR("data/bathy/ne_10m_land.shp", verbose = F) %>% 
+  spTransform(CRSobj = crs("EPSG:4326")) %>% 
+  crop(extent(-180, 180, 0, 90)) %>% # Crop shapefile
+  spTransform(CRSobj = crs(arctic_6931)) %>% # Project shapefile in laea
+  fortify() %>% # Convert to a dataframe for ggplot
+  rename(xc = long, yc = lat)
+
+# Rivers
+rivers_6931 <- rgdal::readOGR("data/bathy/ne_10m_rivers_lake_centerlines.shp", verbose = F) %>% 
+  spTransform(CRSobj = crs("EPSG:4326")) %>% 
+  crop(extent(-180, 180, 0, 90)) %>% # Crop shapefile
+  spTransform(CRSobj = crs(arctic_6931)) %>% # Project shapefile in laea
+  fortify() %>% # Convert to a dataframe for ggplot
+  rename(xc = long, yc = lat)
+
+# Longitudes
+lon_6931 <- data.frame(lon = rep(seq(-180, 180, 45), each = 200)) %>%
+  group_by(lon) %>%
+  mutate(lat =  seq(0, 90, length.out = 200)) %>%
+  ungroup() %>%
+  # Transform into sf
+  st_as_sf(coords = c("lon", "lat"), crs = st_crs("EPSG:4326"), remove = F) %>% 
+  # Change projection
+  st_transform(crs = st_crs(arctic_6931)) %>%
+  mutate(xc = st_coordinates(.)[,1],
+         yc = st_coordinates(.)[,2], 
+         lon = factor(lon)) %>%
+  st_drop_geometry()
+
+# Latitudes
+lat_6931 <- data.frame(lat = rep(seq(0, 90, 10), each = 200)) %>%
+  group_by(lat) %>%
+  mutate(lon =  seq(-180, 180, length.out = 200)) %>%
+  ungroup() %>%
+  # Transform into sf
+  st_as_sf(coords = c("lon", "lat"), crs = st_crs("EPSG:4326"), remove = F) %>% 
+  # Change projection
+  st_transform(crs = st_crs(arctic_6931)) %>%
+  mutate(xc = st_coordinates(.)[,1],
+         yc = st_coordinates(.)[,2], 
+         lon = factor(lon)) %>%
+  st_drop_geometry()
+
+# Arctic circle 
+arctic_circle_6931 <- data.frame(lat = rep(66.5, each = 200)) %>%
+  group_by(lat) %>%
+  mutate(lon =  seq(-180, 180, length.out = 200)) %>%
+  ungroup() %>%
+  # Transform into sf
+  st_as_sf(coords = c("lon", "lat"), crs = st_crs("EPSG:4326"), remove = F) %>% 
+  # Change projection
+  st_transform(crs = st_crs(arctic_6931)) %>%
+  mutate(xc = st_coordinates(.)[,1],
+         yc = st_coordinates(.)[,2], 
+         lon = factor(lon)) %>%
+  st_drop_geometry()
+
+# Bathymetry
+bathy_6931 <- read_csv("data/bathy/bathy_CAO_proj6931.csv", show_col_types = F)
+```
+
+Map of the CAO and its surrounding seas.
+
+```{r}
+map_AO <- bathy_6931 %>%
+  mutate(depth = if_else(depth <= 0, depth, NaN)) %>% 
+  ggplot(aes(x = xc, y = yc)) +
+  # Plot bathy
+  geom_raster(aes(fill = depth), alpha = 0.6) +
+  scale_fill_cmocean("Depth (m)",  name = "deep", direction = -1, limits = c(-4500, 0), oob = scales::squish,
+                     # breaks = c(-4000, -3000, -2000, -1000, -500, -200, 0),
+                     # labels = c(4000, 3000, 2000, 1000, 500, 200, 0)) +
+                     breaks = seq(-4000, 0, 500), labels = seq(-4000, 0, 500)*-1,
+                     alpha = 0.6) +
+  # scale_fill_grey("Depth (m)", start = 0.9, end = 0.3) + 
+  # guides(fill = "none") + 
+  new_scale_fill() +
+  # Plot 200 m isobath
+  # geom_contour(aes(z = depth), breaks = -200, col = "black", lwd = 0.1, alpha = 0.8) +
+  # Plot coastlines
+  # geom_polygon(data = coast_6931, aes(x = xc, y = yc, group = group), fill = "grey30") +
+  geom_polygon(data = coast_6931, aes(x = xc, y = yc, group = group), fill = "grey40", lwd = 0) +
+  # Graticules 
+  geom_path(data = lat_6931, aes(x = xc, y = yc, group = lat), col = "grey80", lwd = 0.1, alpha = 0.5) +
+  geom_path(data = lon_6931, aes(x = xc, y = yc, group = lon), col = "grey80", lwd = 0.1, alpha = 0.5) +
+  # Arctic circle
+  # geom_path(data = arctic_circle_6931, aes(x = xc, y = yc), col = "white", lty = 2, linewidth = 0.4) +
+  coord_fixed(xlim = c(-4500, 4500), ylim = c(-4500, 4500), expand = F) +
+  guides(fill = "none") +
+  # Plot North Pole
+  # geom_point(aes(x = 0, y = 0), size = 0.05) +
+  theme(legend.position = "right", 
+        legend.key.height = unit(0.4, "in"),
+        legend.key.width = unit(0.1, "in"),
+        panel.border = element_rect(fill = NA),
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+ggsave("plots/base_map_AO.png", map_AO, height = 4, width = 6.5, dpi = 600, units = "in")
+
+# Zoom on CAO
+map_CAO <- bathy_6931 %>%
+  mutate(depth = if_else(depth <= 0, depth, NaN)) %>% 
+  ggplot(aes(x = xc, y = yc)) +
+  # Plot bathy
+  geom_raster(aes(fill = depth), alpha = 0.8) +
+  scale_fill_cmocean("Depth (m)",  name = "deep", direction = -1, limits = c(-4500, 0), oob = scales::squish,
+                     # breaks = c(-4000, -3000, -2000, -1000, -500, -200, 0),
+                     # labels = c(4000, 3000, 2000, 1000, 500, 200, 0)) +
+                     breaks = seq(-4000, 0, 500), labels = seq(-4000, 0, 500)*-1) +
+  # scale_fill_grey("Depth (m)", start = 0.9, end = 0.3) + 
+  # guides(fill = "none") + 
+  new_scale_fill() +
+  # Plot 200 m isobath
+  # geom_contour(aes(z = depth), breaks = -200, col = "black", lwd = 0.1, alpha = 0.8) +
+  # Plot coastlines
+  # geom_polygon(data = coast_6931, aes(x = xc, y = yc, group = group), fill = "grey30") +
+  geom_polygon(data = coast_6931, aes(x = xc, y = yc, group = group), fill = "grey40") +
+  # geom_path(data = rivers_6931, aes(x = xc, y = yc, group = group), col = "grey65", lwd = 0.2) +
+  # Graticules 
+  geom_path(data = lat_6931, aes(x = xc, y = yc, group = lat), col = "grey80", lwd = 0.1, alpha = 0.5) +
+  geom_path(data = lon_6931, aes(x = xc, y = yc, group = lon), col = "grey80", lwd = 0.1, alpha = 0.5) +
+  # Arctic circle
+  geom_path(data = arctic_circle_6931, aes(x = xc, y = yc), col = "white", lty = 2, linewidth = 0.4) +
+  coord_fixed(xlim = c(-3100, 2700), ylim = c(-3000, 3200), expand = F) +
+  guides(fill = "none") +
+  # Plot North Pole
+  # geom_point(aes(x = 0, y = 0), size = 0.05) +
+  theme(legend.position = "right", 
+        legend.key.height = unit(0.4, "in"),
+        legend.key.width = unit(0.1, "in"),
+        panel.border = element_rect(fill = NA),
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+ggsave("plots/base_map_CAO.png", map_CAO, height = 4, width = 6.5, dpi = 600, units = "in")
+# map_CAO
+```
+
+Other map AO, black with no background.
+
+```{r}
+map_AO_black <- coast_6931 %>%
+  ggplot() +
+  # Plot coastlines
+  geom_polygon(aes(x = xc, y = yc, group = group), fill = "grey40") +
+  coord_fixed(xlim = c(-4500, 4500), ylim = c(-4500, 4500), expand = F) +
+  guides(fill = "none") +
+  # Plot North Pole
+  # geom_point(aes(x = 0, y = 0), size = 0.05) +
+  theme(legend.position = "right", 
+        legend.key.height = unit(0.4, "in"),
+        legend.key.width = unit(0.1, "in"),
+        panel.border = element_rect(fill = NA),
+        panel.background = element_rect(fill = "transparent"),
+        plot.background = element_rect(fill = "transparent", color = NA), 
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+ggsave("plots/base_map_AO_black.png", bg = "transparent", map_AO_black, height = 4, width = 6.5, dpi = 600, units = "in")
+map_AO_black
+```
+
+## Light comfort zone
+
+Load extrapolated irradiance data from TriOS. 
+
+```{r light-extrap-loading}
+light <- read_csv("data/light/Ed_integrated_extrapolated.csv", show_col_types = F, locale = locale(tz = "UTC")) %>%
+  # Use date for combining with other dataset
+  rename(date_loc = date_round) %>%
+  # Convert from local time (Quebec) to UTC
+  mutate(date = date_loc + hours(4),
+         day = day(date_loc)) %>%
+  mutate(alpha = if_else(between(ed_log_PAR, -9, -6), "in", "out")) %>%
+  filter(is.na(station_group) == F) 
+
+LCZ <- light %>%
+  filter(day > 18) %>%
+  ggplot() +
+  geom_tile(aes(x = date_loc, y = depth, alpha = alpha), fill = "grey", na.rm = T) + 
+  geom_contour(aes(x = date_loc, y = depth, z = ed_log_PAR), breaks = c(-6, -9), col = "red", na.rm = T, lwd = 0.4) +
+  scale_alpha_discrete(range = c(1, 0)) +
+  scale_y_reverse() + 
+  theme(legend.position = "right", 
+        legend.key.height = unit(0.4, "in"),
+        legend.key.width = unit(0.1, "in"),
+        panel.border = element_rect(fill = NA),
+        panel.background = element_rect(fill = "transparent"),
+        plot.background = element_rect(fill = "transparent", color = NA), 
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+ggsave("plots/LCZ.png", bg = "transparent", LCZ, height = 4, width = 6.5, dpi = 600, units = "in")
+```
+
+
+
+
